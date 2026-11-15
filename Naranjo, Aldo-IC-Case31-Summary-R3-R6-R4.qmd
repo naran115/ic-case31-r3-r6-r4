@@ -1,0 +1,315 @@
+---
+title: "Case 31: Summary of Data Analysis"
+subtitle: "IC Case 31 | R3, R6, and R4 | Employees Federal Credit Union"
+author: "Aldo Naranjo"
+date: today
+format:
+  revealjs:
+    theme: simple
+    slide-number: true
+    scrollable: true
+    smaller: true
+    embed-resources: true
+    code-fold: true
+    code-summary: "Show R code"
+    toc: true
+    toc-depth: 2
+    toc-title: "Contents"
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Overview
+
+> *Run appropriate analyses to address R3, R6, and R4, and report the results and interpretations with the relevant R output.*
+
+| RQ | Research question | Measures | Analysis |
+|:--|:--|:--|:--|
+| R3 | What is members' attitude toward employee proficiency? | `at_emp` (mean of q3 to q6) | Descriptives, one sample t test |
+| R6 | What do members think about how efficiently the credit union is operated? | q9 to q12, q31 to q34, q37 | Descriptives, one sample t tests, chi square goodness of fit |
+| R4 | Do members who live in the headquarters area differ from those who live elsewhere (q38) in... | | |
+| R4a | ...attitude toward employees? | `at_emp` by q38 | Independent samples t test |
+| R4b | ...awareness of the credit union's services? | q13 to q26 by q38 | Chi square tests of independence |
+| R4c | ...attitude toward operational efficiency? | R6 items by q38 | t tests (metric items), chi square (categorical items) |
+
+**Carried over from the reliability and factor analysis:** q3 to q6 formed one reliable scale (alpha = .87), so they are averaged into `at_emp`. q31 to q34 did *not* (alpha = .47, two factors), so each is analyzed on its own.
+
+## Data and setup
+
+```{r}
+#| label: setup
+#| code-fold: false
+# install.packages(c("psych", "car"))   # run once if needed
+library(tidyverse)
+library(haven)
+library(labelled)
+library(knitr)
+library(psych)
+library(car)
+
+data <- read_sav("Case 31 Data_efcu_1_AN_cleaned.sav") |>
+  sort_val_labels() |>
+  mutate(
+    at_emp = rowMeans(across(c(q3, q4, q5, q6)), na.rm = TRUE),
+    residence = factor(as.numeric(q38), levels = 1:2,
+                       labels = c("Headquarters area", "Elsewhere"))
+  )
+
+theme_set(theme_minimal(base_size = 14))
+
+# Mean, SD and a one sample t test against a midpoint
+t_summary <- function(df, vars, mu = 3) {
+  map_dfr(vars, \(v) {
+    x <- as.numeric(df[[v]])
+    test <- t.test(x, mu = mu)
+    tibble(item = v, label = var_label(df[[v]]), n = sum(!is.na(x)),
+           mean = round(mean(x, na.rm = TRUE), 2), sd = round(sd(x, na.rm = TRUE), 2),
+           mu = mu, t = round(unname(test$statistic), 2), df = unname(test$parameter),
+           p = format.pval(test$p.value, digits = 2, eps = 0.001))
+  })
+}
+
+table(data$residence)
+```
+
+# R3: Attitude toward employee proficiency
+
+## R3: Descriptive statistics
+
+::: {.columns}
+::: {.column width="45%"}
+```{r}
+#| label: r3-describe
+describe(data$at_emp) |>
+  select(n, mean, sd, median, min, max, skew) |>
+  round(2) |>
+  kable()
+
+data |> t_summary(c("q3", "q4", "q5", "q6"), mu = 3) |>
+  select(item, label, mean, sd) |>
+  kable()
+```
+:::
+
+::: {.column width="55%"}
+```{r}
+#| label: fig-r3
+#| fig-cap: "Most members rate employees between agree and strongly agree"
+#| fig-height: 4
+ggplot(data, aes(x = at_emp)) +
+  geom_histogram(binwidth = 0.25, fill = "#2c7fb8", color = "white") +
+  geom_vline(xintercept = 3, linetype = "dashed") +
+  labs(x = "Attitude toward employees (1 to 5)", y = "Members")
+```
+:::
+:::
+
+## R3: One sample t test
+
+The midpoint (3 = uncertain) is the usual benchmark. Because almost every member is above it, I also tested against 4 (= agree), as in the class demo, to see whether members go beyond simply agreeing.
+
+```{r}
+#| label: r3-ttest
+t.test(at_emp ~ 1, mu = 3, data = data)
+t.test(at_emp ~ 1, mu = 4, data = data)
+```
+
+## R3: Insight
+
+**Members think highly of the employees.** The average `at_emp` score is **4.21** (SD = 0.59) on a 1 to 5 scale, with a median of 4 and nobody below 2.75 (@fig-r3). The score is far above neutral (t = 22.95, p < .001) and also significantly above "agree" (t = 3.91, p < .001), so the typical member lands between agree and strongly agree.
+
+Looking at the individual items, courtesy (4.35) and helpfulness (4.31) are the strongest, while professionalism and availability are slightly lower (both 4.08). If there is anything to work on, it is being available when members need someone. Overall, though, employees are a strength the credit union can lean on in its messaging.
+
+# R6: Operational efficiency
+
+## R6: Descriptive statistics and one sample t tests
+
+Since q31 to q34 did not form a reliable scale, each item is reported separately.
+
+```{r}
+#| label: tbl-r6-ttest
+#| tbl-cap: "Rating items compared with the midpoint (2.5 for the four point q10, 3 for the others)"
+bind_rows(
+  data |> t_summary("q10r", mu = 2.5),
+  data |> t_summary(c("q31", "q32", "q33", "q34", "q37r"), mu = 3)
+) |>
+  select(-df) |>
+  kable()
+```
+
+## R6: Chi square goodness of fit tests
+
+```{r}
+#| label: tbl-r6-chisq
+#| tbl-cap: "Chi square goodness of fit for the categorical items"
+map_dfr(c("q9", "q11", "q12"), \(v) {
+  counts <- table(as_factor(data[[v]]), useNA = "no")
+  counts <- counts[counts > 0]
+  test <- chisq.test(counts)
+  tibble(item = v, label = var_label(data[[v]]),
+         observed = str_c(names(counts), " ", counts, collapse = "; "),
+         `chi square` = round(unname(test$statistic), 2), df = unname(test$parameter),
+         p = format.pval(test$p.value, digits = 2, eps = 0.001))
+}) |>
+  kable()
+```
+
+## R6: Insight
+
+**Operations are rated positively, but unevenly across areas.** Every rating item is significantly above its midpoint (all p < .001). The overall rating of how the credit union is managed (q37) is the highest at **4.07**, and confidentiality of personal information (q31) leads the specific items at **3.95**. Statements are seen as accurate (q10: 3.47 on a 4 point scale) and almost everyone finds them easy to understand (125 of 128).
+
+The weaker spots are **loan applications being simple and easy (q34: 3.46)** and **services meeting members' needs (q33: 3.59)**. Because these items do not move together (the reliability analysis showed alpha = .47), a member can be happy with privacy and still find the loan paperwork a hassle. That is exactly why they are kept separate here.
+
+Two categorical results stand out. About 23% of members (29 of 128) say statements do not come often enough. And of members who answered q12, 30% said their account information is *not* kept confidential, even though most agree on q31 that staff keep financial information private. That gap is worth a follow up question.
+
+# R4: Headquarters area vs. elsewhere
+
+## R4a: Descriptive statistics and Levene's test
+
+::: {.columns}
+::: {.column width="45%"}
+```{r}
+#| label: r4a-groups
+data |>
+  group_by(residence) |>
+  summarise(n = n(), mean = round(mean(at_emp), 2), sd = round(sd(at_emp), 2)) |>
+  kable()
+
+leveneTest(at_emp ~ residence, data = data)
+```
+:::
+
+::: {.column width="55%"}
+```{r}
+#| label: fig-r4a
+#| fig-cap: "Attitude toward employees is similar in both groups"
+#| fig-height: 4
+ggplot(data, aes(x = residence, y = at_emp)) +
+  geom_boxplot(fill = "#a6cee3") +
+  labs(x = NULL, y = "Attitude toward employees (1 to 5)")
+```
+:::
+:::
+
+## R4a: Independent samples t test
+
+```{r}
+#| label: r4a-ttest
+t.test(at_emp ~ residence, var.equal = TRUE, data = data)
+```
+
+## R4a: Insight
+
+**Where members live does not change how they see the employees.** Members in the headquarters area average **4.28** and members elsewhere average **4.14**, a gap of only 0.14 points (@fig-r4a). Levene's test shows the two groups have similar spread (p = .84), so the equal variance t test is appropriate, and it is not significant (t = 1.29, df = 126, p = .198). Members outside headquarters, who probably deal with staff less in person, still rate them highly.
+
+## R4b: Cross tabulation and chi square test (regular share account)
+
+Example: the regular share account (q13), with column percentages so each residence group adds to 100%.
+
+```{r}
+#| label: r4b-q13
+ct_q13 <- table(as_factor(data$q13r), data$residence)
+ct_q13
+round(prop.table(ct_q13, margin = 2) * 100, 1)
+chisq.test(ct_q13)
+```
+
+```{r}
+#| label: fig-r4b
+#| fig-cap: "Awareness of the regular share account by residence"
+#| fig-height: 3.5
+mosaicplot(t(ct_q13), main = NULL, color = c("#f0f0f0", "#a6cee3", "#2c7fb8"),
+           xlab = "Residence", ylab = "Awareness (q13)")
+```
+
+## R4b: Chi square tests of independence (all fourteen services)
+
+```{r}
+#| label: tbl-r4b-all
+#| tbl-cap: "Chi square tests of awareness by residence (simulated p values when expected counts are under 5)"
+set.seed(123)
+aware_items <- str_c("q", 13:26, "r")
+map_dfr(aware_items, \(v) {
+  ct <- table(as_factor(data[[v]]), data$residence)
+  ct <- ct[rowSums(ct) > 0, , drop = FALSE]
+  small <- min(suppressWarnings(chisq.test(ct))$expected) < 5
+  test <- if (small) chisq.test(ct, simulate.p.value = TRUE, B = 10000) else chisq.test(ct)
+  tibble(item = v, service = var_label(data[[str_remove(v, "r$")]]),
+         `chi square` = round(unname(test$statistic), 2),
+         method = if_else(small, "simulated p", "chi square"),
+         p = round(test$p.value, 3))
+}) |>
+  kable()
+```
+
+## R4b: Insight
+
+**Awareness and use of the services look about the same no matter where members live.** For the regular share account, the pattern is close in both groups, and the test is not significant (χ² = 1.27, df = 2, p = .53). The same holds for all fourteen services: none of the tests reaches p < .05 (@tbl-r4b-all). The closest is the Mastercard, where a larger share of headquarters area members are unaware (18% vs. 7%), but even that is not significant (p = .15).
+
+So the awareness gaps found in R5 are a credit union wide issue, not a local one. Promotion for the lesser known products can go out to everyone the same way rather than being targeted by location.
+
+## R4c: Independent samples t tests (metric items)
+
+```{r}
+#| label: tbl-r4c-metric
+#| tbl-cap: "Metric R6 items by residence (Welch p shown when Levene's test is significant)"
+num <- zap_labels(data)   # plain numbers for the tests
+map_dfr(c("q10r", "q31", "q32", "q33", "q34", "q37r"), \(v) {
+  f <- as.formula(str_c(v, " ~ residence"))
+  lev <- leveneTest(f, data = num)$`Pr(>F)`[1]
+  eq <- t.test(f, var.equal = TRUE, data = num)
+  welch <- t.test(f, var.equal = FALSE, data = num)
+  means <- tapply(num[[v]], num$residence, mean, na.rm = TRUE)
+  tibble(item = v, label = var_label(data[[v]]),
+         `HQ mean` = round(means[1], 2), `Elsewhere mean` = round(means[2], 2),
+         `Levene p` = round(lev, 3),
+         t = round(unname(if (lev < .05) welch$statistic else eq$statistic), 2),
+         p = round(if (lev < .05) welch$p.value else eq$p.value, 3),
+         test = if_else(lev < .05, "Welch", "Equal variance"))
+}) |>
+  kable()
+```
+
+## R4c: Fisher's exact tests (categorical items)
+
+```{r}
+#| label: tbl-r4c-cat
+#| tbl-cap: "Categorical R6 items by residence"
+map_dfr(c("q9_about_right", "q11", "q12"), \(v) {
+  ct <- table(as_factor(data[[v]]), data$residence)
+  ct <- ct[rowSums(ct) > 0, , drop = FALSE]
+  test <- fisher.test(ct)
+  tibble(item = v, label = var_label(data[[v]]) %||% v,
+         HQ = str_c(rownames(ct), " ", ct[, 1], collapse = "; "),
+         Elsewhere = str_c(rownames(ct), " ", ct[, 2], collapse = "; "),
+         `Fisher p` = round(test$p.value, 3))
+}) |>
+  kable()
+```
+
+Fisher's exact test is used for these 2 × 2 tables because q11 has expected counts under 5.
+
+## R4c: Insight
+
+**Members rate operations about the same wherever they live, with one exception: loan applications.** Members outside the headquarters area find loan applications *simpler and easier* (q34: **3.61** vs. **3.28**). The headquarters group's answers are also more spread out (Levene p = .001), so the Welch test is used, and the difference is significant (t = −2.28, p = .025).
+
+Nothing else differs. Confidentiality (q31) leans slightly higher at headquarters (4.05 vs. 3.86), but that is not significant (p = .11), and the overall rating, statement accuracy, processing speed, and services meeting needs are nearly identical. Statement frequency, understandability, and confidence in privacy also do not differ by location (all Fisher p > .20).
+
+The loan finding is worth a closer look. Headquarters area members may be applying for different kinds of loans or dealing with a different process in person, and that is where the friction shows up.
+
+## Summary
+
+| RQ | Key takeaway |
+|:--|:--|
+| R3 | Members rate employees very highly (4.21 of 5), above even "agree." Availability is the lowest item. |
+| R6 | Operations are rated positively overall (4.07). Loan application ease and services meeting needs are the weakest areas. |
+| R4a | No difference in attitude toward employees by residence (p = .198). |
+| R4b | Awareness of all fourteen services is similar by residence. Promotion does not need to be targeted by location. |
+| R4c | Only loan application ease differs. Members outside headquarters find it easier (3.61 vs. 3.28, p = .025). |
+
+## Appendix: GitHub links
+
+- [View my GitHub Pages report](https://naran115.github.io/ic-case31-r3-r6-r4/Naranjo,%20Aldo-IC-Case31-Summary-R3-R6-R4.html)
+- [GitHub repo](https://github.com/naran115/ic-case31-r3-r6-r4)
